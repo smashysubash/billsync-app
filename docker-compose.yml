@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: .
+      network: host
+    container_name: billsync-backend
+    network_mode: host
+    volumes:
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      network: host
+      args:
+        - VITE_API_URL=${VITE_API_URL}
+    container_name: billsync-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

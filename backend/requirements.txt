@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pdfplumber
+pymupdf
+paddleocr
+pdf2image
+python-multipart
+pymongo[srv]
+apscheduler
+rapidfuzz
+httpx
+pydantic
+certifi

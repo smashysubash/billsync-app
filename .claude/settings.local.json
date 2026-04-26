@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(python3 -m pip install pdfplumber -q)",
+      "Bash(python3 -c \"import sys; print\\(sys.version\\); import pkgutil; pkgs = [p.name for p in pkgutil.iter_modules\\(\\)]; print\\([p for p in pkgs if 'pdf' in p.lower\\(\\) or 'fitz' in p.lower\\(\\)]\\)\")",
+      "Bash(pdftotext -layout /home/smashy/workspace/billsync-app/invoice-sample.pdf -)",
+      "Read(//usr/bin/**)",
+      "Bash(command -v pdftotext mudraw mutool)",
+      "Bash(apt list *)",
+      "Bash(dpkg -l)",
+      "Bash(grep -E \"^[A-Za-z0-9 ]{5,}$\")",
+      "Bash(grep -v \"^[A-Z]{2,}\")"
+    ]
+  }
+}
