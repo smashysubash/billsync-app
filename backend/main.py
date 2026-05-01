@@ -39,7 +39,11 @@ from backend.price_checker import (
 
 # Try importing Zoho module — allow startup without credentials (graceful degradation)
 try:
-    from backend.zoho import create_bill, fetch_items, refresh_access_token
+    from backend.zoho import (
+        create_bill, fetch_items, refresh_access_token,
+        build_auth_url, exchange_code_for_tokens,
+        get_connection_status, save_config, _load_config,
+    )
     ZOHO_ENABLED = True
 except Exception:
     ZOHO_ENABLED = False
@@ -236,8 +240,9 @@ async def process_invoice(payload: dict):
                 detail=f"Invoice {meta['invoice_number']} has already been processed (status: {existing.get('status', 'unknown')}).",
             )
 
-    # Parse line items
-    raw_items = parse_invoice_lines(text)
+    # Parse line items — pass file_path to enable table-based extraction
+    file_path: str = payload.get("file_path", "")
+    raw_items = parse_invoice_lines(text, file_path=file_path or None)
     if not raw_items:
         raise HTTPException(
             status_code=422,
@@ -372,14 +377,104 @@ async def get_product_mapping(vendor_product_name: str):
         raise HTTPException(status_code=404, detail="No mapping found.")
     return mapping
 
+@app.get("/zoho/status", tags=["Zoho"])
+async def zoho_status():
+    """Return current Zoho connection state."""
+    if not ZOHO_ENABLED:
+        return {"connected": False, "organization_id": None, "has_client_id": False}
+    return get_connection_status()
+
+
+class ZohoConnectRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    redirect_uri: str  # e.g. "http://localhost:8001/zoho/callback"
+
+
+@app.post("/zoho/connect", tags=["Zoho"])
+async def zoho_connect(req: ZohoConnectRequest):
+    """
+    Step 1 of OAuth: store client credentials temporarily and return the
+    Zoho authorization URL for the user to open in their browser.
+    """
+    if not ZOHO_ENABLED:
+        raise HTTPException(status_code=503, detail="Zoho module unavailable.")
+
+    # Persist client creds (without refresh_token yet) so the callback can use them
+    save_config(
+        client_id=req.client_id,
+        client_secret=req.client_secret,
+        refresh_token="",  # not yet acquired
+        organization_id="",
+    )
+
+    auth_url = build_auth_url(req.client_id, req.redirect_uri)
+    return {"auth_url": auth_url}
+
+
+@app.get("/zoho/callback", tags=["Zoho"])
+async def zoho_callback(code: str, redirect_uri: str = "http://localhost:8001/zoho/callback"):
+    """
+    Step 2 of OAuth: Zoho redirects here with ?code=...
+    The backend exchanges the code for tokens and saves them.
+    Returns an HTML page that closes itself (popup flow).
+    """
+    if not ZOHO_ENABLED:
+        raise HTTPException(status_code=503, detail="Zoho module unavailable.")
+
+    cfg = _load_config()
+    if not cfg or not cfg.get("client_id"):
+        raise HTTPException(status_code=400, detail="No client credentials found. Call /zoho/connect first.")
+
+    try:
+        result = exchange_code_for_tokens(
+            client_id=cfg["client_id"],
+            client_secret=cfg["client_secret"],
+            code=code,
+            redirect_uri=redirect_uri,
+        )
+        org_id = result.get("organization_id", "")
+        html = f"""
+        <!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px;text-align:center">
+        <h2 style="color:#16a34a">&#10003; Zoho Books connected!</h2>
+        <p>Organization ID: <strong>{org_id or 'see settings'}</strong></p>
+        <p>You can close this window.</p>
+        <script>setTimeout(() => window.close(), 2000);</script>
+        </body></html>
+        """
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html)
+    except Exception as e:
+        logger.error("OAuth callback failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Token exchange failed: {e}")
+
+
+class ZohoSaveConfigRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    refresh_token: str
+    organization_id: Optional[str] = ""
+
+
+@app.post("/zoho/save-config", tags=["Zoho"])
+async def zoho_save_config(req: ZohoSaveConfigRequest):
+    """Manually save Zoho credentials (alternative to the OAuth flow)."""
+    if not ZOHO_ENABLED:
+        raise HTTPException(status_code=503, detail="Zoho module unavailable.")
+    save_config(req.client_id, req.client_secret, req.refresh_token, req.organization_id or "")
+    return {"success": True, "message": "Zoho credentials saved."}
+
 
 @app.get("/zoho/sync-items/", tags=["Zoho"])
 async def sync_zoho_items():
     """Manually trigger a full Zoho Books item sync."""
     if not ZOHO_ENABLED:
+        raise HTTPException(status_code=503, detail="Zoho module unavailable.")
+    cfg = _load_config()
+    if not cfg:
         raise HTTPException(
             status_code=503,
-            detail="Zoho integration is not configured. Set ZOHO_* environment variables.",
+            detail="Zoho not connected. Complete OAuth setup via Settings.",
         )
     try:
         count = fetch_items()

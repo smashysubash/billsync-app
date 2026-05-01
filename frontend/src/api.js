@@ -63,3 +63,41 @@ export async function syncZohoItems() {
   }
   return res.json();
 }
+
+export async function zohoStatus() {
+  const res = await fetch(`${BASE}/zoho/status`);
+  if (!res.ok) throw new Error('Could not fetch Zoho status');
+  return res.json();
+}
+
+export async function zohoConnect(clientId, clientSecret) {
+  const redirectUri = `${window.location.protocol}//${window.location.hostname}:8001/zoho/callback`;
+  const res = await fetch(`${BASE}/zoho/connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? 'Connect failed');
+  }
+  return res.json();
+}
+
+export async function zohoSaveConfig(clientId, clientSecret, refreshToken, orgId) {
+  const res = await fetch(`${BASE}/zoho/save-config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      organization_id: orgId,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? 'Save failed');
+  }
+  return res.json();
+}

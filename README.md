@@ -43,6 +43,11 @@ Edit `.env` with:
 - `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_ORGANIZATION_ID`.
 
 ### 3. Launch
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
 ```bash
 docker-compose up --build
 ```

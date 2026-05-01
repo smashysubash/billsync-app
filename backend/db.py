@@ -31,6 +31,7 @@ def _ensure_indexes():
     db["invoices"].create_index("invoice_number", unique=True)
     db["price_history"].create_index([("zoho_item_id", 1), ("date", -1)])
     db["product_cache"].create_index("zoho_item_id", unique=True)
+    db["zoho_config"].create_index("key", unique=True)
 
 
 # ── Collection helpers ──────────────────────────────────────────────────────
@@ -61,3 +62,10 @@ def invoices() -> Collection:
     Schema: { invoice_number, vendor, date, status, zoho_bill_id }
     """
     return get_db()["invoices"]
+
+
+def zoho_config() -> Collection:
+    """Zoho OAuth credentials stored in DB (survives restarts).
+    Schema: { key: "main", client_id, client_secret, refresh_token, organization_id }
+    """
+    return get_db()["zoho_config"]

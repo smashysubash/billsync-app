@@ -12,7 +12,10 @@
       "Bash(apt list *)",
       "Bash(dpkg -l)",
       "Bash(grep -E \"^[A-Za-z0-9 ]{5,}$\")",
-      "Bash(grep -v \"^[A-Z]{2,}\")"
+      "Bash(grep -v \"^[A-Z]{2,}\")",
+      "Bash(cp \"/home/smashy/.claude/projects/-home-smashy-workspace-billsync-app/251183e3-add1-40d5-b301-6d45ae30f57b/tool-results/webfetch-1777553308337-t3zrrf.bin\" /tmp/design.gz)",
+      "Bash(gunzip -f /tmp/design.gz)",
+      "Read(//tmp/**)"
     ]
   }
 }

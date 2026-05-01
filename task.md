@@ -85,7 +85,7 @@
 
 ---
 
-## ⬜ Phase 10 — UI Redesign (Match BillSync-ui.html Reference)
+## ✅ Phase 10 — UI Redesign (Match BillSync-ui.html Reference)
 
 The reference design (`BillSync-ui.html`) is significantly more polished than the current v1 frontend. This phase rebuilds the React UI to match it.
 
