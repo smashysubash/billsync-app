@@ -80,7 +80,6 @@ def save_price_history(
             "date": datetime.now(timezone.utc),
         }
     )
-    logger.debug("Saved price history for item %s: rate=%s mrp=%s", zoho_item_id, rate, mrp)
 
 
 def get_item_from_cache(zoho_item_id: str) -> Optional[dict]:

@@ -2,9 +2,9 @@ services:
   backend:
     build:
       context: .
-      network: host
     container_name: billsync-backend
-    network_mode: host
+    ports:
+      - "8001:8001"
     volumes:
       - ./uploads:/app/uploads
     env_file:
@@ -20,7 +20,7 @@ services:
         - VITE_API_URL=${VITE_API_URL}
     container_name: billsync-frontend
     ports:
-      - "5173:80"
+      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped

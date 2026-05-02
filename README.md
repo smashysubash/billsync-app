@@ -51,7 +51,7 @@ docker compose -f docker-compose.dev.yml up --build
 ```bash
 docker-compose up --build
 ```
-- **Frontend:** [http://localhost:5173](http://localhost:5173)
+- **Frontend:** [http://localhost:3000](http://localhost:3000) (Production) / [http://localhost:5174](http://localhost:5174) (Dev)
 - **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---

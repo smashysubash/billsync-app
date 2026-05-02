@@ -13,6 +13,7 @@ OAuth flow (automated):
 """
 
 import os
+import json
 import logging
 from datetime import datetime, timezone
 import httpx
@@ -189,6 +190,8 @@ def refresh_access_token() -> str:
         },
         timeout=15,
     )
+    if resp.status_code != 200:
+        logger.error("Zoho token refresh failed (HTTP %s): %s", resp.status_code, resp.text)
     resp.raise_for_status()
     data = resp.json()
     if "access_token" not in data:
@@ -252,11 +255,15 @@ def fetch_items() -> int:
         now = datetime.now(timezone.utc)
         col.insert_many([
             {
-                "zoho_item_id":   str(item["item_id"]),
-                "name":           item["name"],
-                "rate":           item.get("rate", 0.0),
-                "mrp":            item.get("custom_fields_hash", {}).get("cf_mrp"),
-                "last_synced_at": now,
+                "zoho_item_id":          str(item["item_id"]),
+                "name":                  item["name"],
+                "sku":                   item.get("sku", ""),
+                "rate":                  item.get("rate", 0.0),
+                "purchase_account_id":   item.get("purchase_account_id", ""),
+                "purchase_account_name": item.get("purchase_account_name", ""),
+                "is_inventory":          item.get("is_inventory_tracked", False),
+                "mrp":                   item.get("custom_fields_hash", {}).get("cf_mrp"),
+                "last_synced_at":        now,
             }
             for item in all_items
         ])
@@ -273,22 +280,57 @@ def create_bill(
     invoice_date: str,
     line_items: list[dict],
 ) -> dict:
-    """Create a purchase bill in Zoho Books."""
+    """Create a purchase bill in Zoho Books with automatic tax mapping."""
+    # Fetch taxes to find matching IDs
+    all_taxes = fetch_taxes()
+   
+    def find_tax_info(pct: float) -> dict:
+        # Match by percentage (round to 2 decimals to avoid floating point issues)
+        for t in all_taxes:
+            t_pct = t.get("tax_percentage") or t.get("tax_group_percentage") or 0.0
+            if abs(float(t_pct) - pct) < 0.01:
+                return {
+                    "tax_id":   t.get("tax_id"),
+                    "tax_type": t.get("tax_type", "tax")
+                }
+        
+        # Fallback: try to match by common name if pct is standard
+        name_map = {18.0: "GST18", 5.0: "GST5", 12.0: "GST12", 0.0: "GST0"}
+        target_name = name_map.get(round(float(pct), 2))
+        if target_name:
+            for t in all_taxes:
+                if t.get("tax_name") == target_name:
+                    return {"tax_id": t["tax_id"], "tax_type": t.get("tax_type", "tax")}
+                    
+        logger.warning("No matching Zoho tax found for %s%%", pct)
+        return {}
+
+    line_items_payload = []
+    for li in line_items:
+        tax_info = find_tax_info(li.get("cgst_pct", 0) + li.get("sgst_pct", 0))
+        item = {
+            "item_id":     li["item_id"],
+            **({"account_id": li["account_id"]} if li.get("account_id") else {}),
+            "name":        li["name"],
+            # "description": li.get("description", ""),
+            "quantity":    li["quantity"],
+            "rate":        li["rate"],
+            "discount":    f"{li.get('discount', 0)}%",
+            **tax_info
+        }
+        line_items_payload.append(item)
+
     payload = {
-        "vendor_id":   vendor_id,
-        "bill_number": invoice_number,
-        "date":        invoice_date,
-        "line_items": [
-            {
-                "item_id":  li["item_id"],
-                "name":     li["name"],
-                "quantity": li["quantity"],
-                "rate":     li["rate"],
-            }
-            for li in line_items
-        ],
+        "vendor_id":        vendor_id,
+        "bill_number":      invoice_number,
+        "reference_number": invoice_number,
+        "date":             invoice_date,
+        "is_inclusive_tax": False,
+        "discount_type":    "item_level",
+        "line_items":       line_items_payload,
     }
 
+    logger.debug("Zoho Create Bill Payload: %s", json.dumps(payload, indent=2))
     resp = httpx.post(
         f"{ZOHO_API_BASE}/bills",
         headers=_headers(),
@@ -296,6 +338,9 @@ def create_bill(
         json=payload,
         timeout=30,
     )
+    resp_data = resp.json()
+    logger.debug("Zoho Create Bill Response: %s", resp_data)
+    
     if resp.status_code == 401:
         refresh_access_token()
         resp = httpx.post(
@@ -306,8 +351,36 @@ def create_bill(
             timeout=30,
         )
 
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.error("Zoho API error: %s | Response: %s", e, resp.text)
+        raise
+
     result = resp.json()
     logger.info("Created Zoho bill %s (bill_id=%s)",
                 invoice_number, result.get("bill", {}).get("bill_id"))
     return result
+
+
+def fetch_taxes() -> list[dict]:
+    """Fetch available tax rates and tax groups from Zoho Books."""
+    resp = httpx.get(
+        f"{ZOHO_API_BASE}/settings/taxes",
+        headers=_headers(),
+        params=_org_params(),
+        timeout=15,
+    )
+    if resp.status_code == 401:
+        refresh_access_token()
+        resp = httpx.get(
+            f"{ZOHO_API_BASE}/settings/taxes",
+            headers=_headers(),
+            params=_org_params(),
+            timeout=15,
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    taxes = data.get("taxes", [])
+    logger.info("Fetched %d taxes/groups from Zoho", len(taxes))
+    return taxes

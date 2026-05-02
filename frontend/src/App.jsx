@@ -405,18 +405,21 @@ function SuccessScreen({ data, onNew }) {
           {!data?.zoho_bill_id && (
             <div className="success-row" style={{ marginTop: 4 }}>
               <div className="l" style={{ color: 'var(--warn)', fontSize: 13 }}>
-                Note: Invoice saved locally — configure VENDOR_ZOHO_ID to push bills to Zoho.
+                {data?.zoho_error 
+                  ? `Zoho Error: ${data.zoho_error}`
+                  : 'Note: Invoice saved locally — configure VENDOR_ZOHO_ID to push bills to Zoho.'
+                }
               </div>
             </div>
           )}
         </div>
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-          {data?.zoho_bill_id && (
+          {/* {data?.zoho_bill_id && (
             <button className="btn btn-secondary">
               View in Zoho Books ↗
             </button>
-          )}
+          )} */}
           <button className="btn btn-primary" onClick={onNew}>
             Process another invoice
           </button>

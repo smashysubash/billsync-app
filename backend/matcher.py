@@ -9,15 +9,34 @@ Logic:
 """
 
 import logging
-from typing import Optional
-from rapidfuzz import process, fuzz
+import re
+from rapidfuzz import process, fuzz, utils
 from backend.db import product_mapping, product_cache
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 VENDOR = "Milky Mist"
-TOP_N = 5
-MATCH_THRESHOLD = 60  # Minimum score to include a candidate
+TOP_N = None
+MATCH_THRESHOLD = 0  # Include all items
+
+
+def product_processor(s: str) -> str:
+    """
+    Normalize product names for better matching:
+    - Lowercase
+    - Normalize units (gm, gms -> g)
+    - Remove non-alphanumeric characters
+    """
+    if not s:
+        return ""
+    s = str(s).lower()
+    # Normalize grams: 100GM, 100 gm, 100gms -> 100g
+    s = re.sub(r"(\d+)\s*(gms?|gm|g)\b", r"\1g", s)
+    # Normalize milliliters: 500 ml, 500ML -> 500ml
+    s = re.sub(r"(\d+)\s*(mls?|ml)\b", r"\1ml", s)
+    # Standard rapidfuzz cleaning (removes punctuation, etc.)
+    return utils.default_process(s)
 
 
 def get_mapping(vendor_product_name: str) -> Optional[dict]:
@@ -38,41 +57,39 @@ def fuzzy_match(vendor_product_name: str) -> list[dict]:
     """
     Run rapidfuzz against locally-cached Zoho items.
 
-    Returns a list of up to TOP_N candidates:
+    Returns a list of candidates sorted by score:
         [ { zoho_item_id, zoho_item_name, score }, ... ]
     """
     # Load all cached Zoho items
-    items = list(product_cache().find({}, {"_id": 0, "zoho_item_id": 1, "name": 1}))
+    items = list(product_cache().find({}, {"_id": 0, "zoho_item_id": 1, "name": 1, "sku": 1}))
     if not items:
         logger.warning("product_cache is empty — run Zoho sync first")
         return []
 
     choices = {item["zoho_item_id"]: item["name"] for item in items}
+    sku_map = {item["zoho_item_id"]: item.get("sku") for item in items}
 
+    # Use WRatio for better overall matching performance
+    # and our custom processor for unit normalization.
     results = process.extract(
         vendor_product_name,
         choices,
-        scorer=fuzz.token_set_ratio,
+        scorer=fuzz.WRatio,
+        processor=product_processor,
         limit=TOP_N,
     )
 
     candidates = []
     for name, score, zoho_item_id in results:
-        if score >= MATCH_THRESHOLD:
-            candidates.append(
-                {
-                    "zoho_item_id": zoho_item_id,
-                    "zoho_item_name": name,
-                    "score": round(score, 1),
-                }
-            )
+        candidates.append(
+            {
+                "zoho_item_id": zoho_item_id,
+                "zoho_item_name": name,
+                "sku": sku_map.get(zoho_item_id),
+                "score": round(score, 1),
+            }
+        )
 
-    logger.debug(
-        "Fuzzy match '%s' → %d candidates (threshold=%d)",
-        vendor_product_name,
-        len(candidates),
-        MATCH_THRESHOLD,
-    )
     return candidates
 
 

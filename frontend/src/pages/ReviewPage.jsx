@@ -37,11 +37,11 @@ function ProductPicker({ row, products, onSelect, onClose, onCreateNew }) {
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
-    if (!query) return products.slice(0, 30);
+    if (!query) return products;
     return products.filter(p =>
       p.name.toLowerCase().includes(query) ||
       (p.sku && p.sku.toLowerCase().includes(query))
-    ).slice(0, 30);
+    );
   }, [q, products]);
 
   return (
@@ -127,6 +127,7 @@ function PdfPreviewPanel({ meta, rows }) {
               <th>Item</th>
               <th style={{ textAlign: 'right' }}>Qty</th>
               <th style={{ textAlign: 'right' }}>Rate</th>
+              <th style={{ textAlign: 'right' }}>Disc%</th>
             </tr>
           </thead>
           <tbody>
@@ -136,6 +137,7 @@ function PdfPreviewPanel({ meta, rows }) {
                 <td style={{ fontSize: 9 }}>{r.extractedName}</td>
                 <td style={{ textAlign: 'right' }}>{r.qty}</td>
                 <td style={{ textAlign: 'right' }}>{Number(r.rate).toFixed(2)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--warn)' }}>{r.discPct > 0 ? `${r.discPct}%` : '—'}</td>
               </tr>
             ))}
             {rows.length > 12 && (
@@ -209,14 +211,16 @@ export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
           products.push({
             id: c.zoho_item_id,
             name: c.zoho_item_name,
-            sku: null,
+            sku: c.sku || null,
             score: c.score ?? null,
             lastRate: null,
           });
         }
       }
     }
-    return products;
+    // If we have candidates, they are already sorted by score. 
+    // masterProducts is a fallback, but let's sort it by name for consistency if used.
+    return products.sort((a, b) => a.name.localeCompare(b.name));
   }, [rows]);
 
   // Compute effective status for a row
@@ -334,6 +338,9 @@ export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
           qty:           r.qty,
           rate:          r.rate,
           amount:        r.amount,
+          cgst_pct:      r.cgstPct,
+          sgst_pct:      r.sgstPct,
+          disc_pct:      r.discPct,
         })),
       });
 
@@ -461,7 +468,7 @@ export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
                         {/* Product cell */}
                         <td className="col-product">
                           <div className="product-cell">
-                            {isEditing ? (
+                            {isEditing || row._status === 'unmapped' ? (
                               <button
                                 className={`product-select ${row._status === 'unmapped' ? 'needs-map' : ''}`}
                                 onClick={() => setPickerOpenFor(row.uid)}
@@ -497,7 +504,12 @@ export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
                             {pickerOpenFor === row.uid && (
                               <ProductPicker
                                 row={row}
-                                products={masterProducts}
+                                products={(row.candidates || []).map(c => ({
+                                  id: c.zoho_item_id,
+                                  name: c.zoho_item_name,
+                                  sku: c.sku,
+                                  score: c.score,
+                                })) || masterProducts}
                                 onSelect={(p) => mapTo(row, p)}
                                 onCreateNew={(name) => createNew(row, name)}
                                 onClose={() => setPickerOpenFor(null)}

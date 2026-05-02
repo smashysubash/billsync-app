@@ -12,6 +12,7 @@ Endpoints:
 import logging
 import os
 import shutil
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -48,11 +49,28 @@ try:
 except Exception:
     ZOHO_ENABLED = False
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
-logger = logging.getLogger(__name__)
+# ── Logging Configuration ───────────────────────────────────────────────────
+
+# Set root logger to INFO to avoid noise from libraries like pdfminer/pymongo
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-7s | %(name)-14s | %(message)s",
+)
+
+# Enable DEBUG specifically for our application code
+logger = logging.getLogger("backend")
+logger.setLevel(logging.DEBUG)
+
+# Explicitly silence noisy third-party libraries even if they use the root logger
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
+logging.getLogger("pymongo").setLevel(logging.INFO)
+logging.getLogger("apscheduler").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+VENDOR_ZOHO_ID = os.environ.get("VENDOR_ZOHO_ID")
 
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
@@ -90,7 +108,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -135,12 +157,23 @@ def extract_text_ocr(file_path: str) -> Optional[str]:
     try:
         images = convert_from_path(file_path)
         ocr = PaddleOCR(use_angle_cls=True, lang="en")
-        lines = []
+        all_blocks = []
         for img in images:
             result = ocr.ocr(img, cls=True)
             for line in result:
                 for word in line:
-                    lines.append(word[1][0])
+                    # word structure: [coordinates, (text, confidence)]
+                    # coordinates: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    coords = word[0]
+                    text = word[1][0]
+                    # Extract Y-coordinate (use top-left y-coordinate for sorting)
+                    y_coord = coords[0][1] if coords else 0
+                    all_blocks.append((y_coord, text))
+        
+        # Sort by Y-coordinate (top-to-bottom reading order)
+        all_blocks.sort(key=lambda x: x[0])
+        lines = [text for _, text in all_blocks]
+        
         return "\n".join(lines).strip() or None
     except Exception as e:
         logger.warning("PaddleOCR failed: %s", e)
@@ -163,6 +196,9 @@ class ConfirmLineItem(BaseModel):
     qty: float
     rate: float
     amount: float
+    cgst_pct: float = 0.0
+    sgst_pct: float = 0.0
+    disc_pct: float = 0.0
 
 
 class ConfirmInvoiceRequest(BaseModel):
@@ -183,7 +219,11 @@ async def upload_invoice(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    # Prefix filename with timestamp + UUID to prevent collision on concurrent uploads
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    uuid_prefix = uuid.uuid4().hex[:8]
+    prefixed_filename = f"{timestamp}_{uuid_prefix}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, prefixed_filename)
     with open(file_path, "wb") as buf:
         shutil.copyfileobj(file.file, buf)
 
@@ -205,6 +245,7 @@ async def upload_invoice(file: UploadFile = File(...)):
 
     return {
         "filename": file.filename,
+        "saved_filename": prefixed_filename,
         "file_path": file_path,
         "pdf_type": pdf_type,
         "text": text,
@@ -254,28 +295,41 @@ async def process_invoice(payload: dict):
     for item in raw_items:
         vendor_name = item["product_name"]
 
-        # Try existing mapping
+        # 1. Check existing mapping (Memory first)
         mapping = get_mapping(vendor_name)
-        # Always get candidates so user can change/correct the mapping
+        
+        # 2. Run fuzzy matching (Always needed for the candidates picker)
         candidates = fuzzy_match(vendor_name)
         
+        zoho_item_id = None
+        zoho_item_name = None
+        is_mapped = False
+
         if mapping:
             zoho_item_id = mapping["zoho_item_id"]
             zoho_item_name = mapping["zoho_item_name"]
-            status, price_detail = check_price_change(
-                zoho_item_id, item["rate"]
-            )
+            is_mapped = True
+        elif candidates and candidates[0]["score"] >= 100:
+            # 3. Auto-choose 100% matches
+            zoho_item_id = candidates[0]["zoho_item_id"]
+            zoho_item_name = candidates[0]["zoho_item_name"]
+            is_mapped = True
+            # Save this 100% match to mapping table for future instant lookup
+            save_mapping(vendor_name, zoho_item_id, zoho_item_name)
+        
+        if is_mapped:
+            status, price_detail = check_price_change(zoho_item_id, item["rate"])
             review_items.append({
                 **item,
                 "zoho_item_id": zoho_item_id,
                 "zoho_item_name": zoho_item_name,
                 "status": status,
                 "price_detail": price_detail,
-                "candidates": candidates, # Include candidates even if mapped
+                "candidates": candidates,
                 "mapped": True,
             })
         else:
-            # Fuzzy match candidates for user to pick from
+            # No mapping found and no 100% match — user must decide
             review_items.append({
                 **item,
                 "zoho_item_id": None,
@@ -286,11 +340,29 @@ async def process_invoice(payload: dict):
                 "mapped": False,
             })
 
+    # Calculate totals
+    subtotal = sum(item["qty"] * item["rate"] for item in review_items)
+    discount_total = sum(
+        item["qty"] * item["rate"] * item["disc_pct"] / 100
+        for item in review_items
+    )
+    tax_total = sum(
+        item["qty"] * item["rate"] * (item["cgst_pct"] + item["sgst_pct"]) / 100
+        for item in review_items
+    )
+    grand_total = subtotal - discount_total + tax_total
+
     return {
         "meta": meta,
         "items": review_items,
         "total_items": len(review_items),
         "unmapped_count": sum(1 for i in review_items if not i["mapped"]),
+        "totals": {
+            "subtotal": round(subtotal, 2),
+            "discount_total": round(discount_total, 2),
+            "tax_total": round(tax_total, 2),
+            "grand_total": round(grand_total, 2),
+        },
     }
 
 
@@ -300,6 +372,7 @@ async def confirm_invoice(req: ConfirmInvoiceRequest):
     User has reviewed all line items and confirmed the invoice.
     Creates a purchase bill in Zoho Books and saves the invoice record.
     """
+    logger.debug("Received confirm-invoice request: %s", req.model_dump())
     # Final duplicate guard
     if req.invoice_number:
         existing = invoices().find_one({"invoice_number": req.invoice_number})
@@ -312,19 +385,31 @@ async def confirm_invoice(req: ConfirmInvoiceRequest):
     zoho_bill_id = None
     zoho_error = None
 
-    if ZOHO_ENABLED and req.vendor_zoho_id:
+    # Use VENDOR_ZOHO_ID from environment (server-side), not from frontend
+    vendor_id = VENDOR_ZOHO_ID or req.vendor_zoho_id
+    
+    if ZOHO_ENABLED and vendor_id:
         try:
-            zoho_line_items = [
-                {
-                    "item_id": li.zoho_item_id,
-                    "name": li.zoho_item_name,
-                    "quantity": li.qty,
-                    "rate": li.rate,
-                }
-                for li in req.line_items
-            ]
+            zoho_line_items = []
+            for li in req.line_items:
+                # Attempt to get the purchase account ID from cache if item exists
+                cached = get_item_from_cache(li.zoho_item_id) if li.zoho_item_id else None
+                acc_id = cached.get("purchase_account_id") if cached else None
+                
+                zoho_line_items.append({
+                    "item_id":     li.zoho_item_id,
+                    "account_id":  None if li.zoho_item_id else acc_id,
+                    "name":        li.zoho_item_name,
+                    "description": f"Extracted from invoice: {li.product_name}",
+                    "quantity":    li.qty,
+                    "rate":        li.rate,
+                    "cgst_pct":    li.cgst_pct,
+                    "sgst_pct":    li.sgst_pct,
+                    "discount":    li.disc_pct,
+                })
+
             result = create_bill(
-                vendor_id=req.vendor_zoho_id,
+                vendor_id=vendor_id,
                 invoice_number=req.invoice_number,
                 invoice_date=req.invoice_date,
                 line_items=zoho_line_items,
@@ -482,6 +567,73 @@ async def sync_zoho_items():
     except Exception as e:
         logger.error("Zoho sync failed: %s", e)
         raise HTTPException(status_code=502, detail=f"Zoho sync failed: {e}")
+
+
+@app.get("/zoho/items/", tags=["Zoho"])
+async def search_zoho_items(q: str = "", limit: int = 10):
+    """
+    Search cached Zoho items by name or SKU (real-time search for product picker).
+    
+    Args:
+        q: Search query (product name or SKU)
+        limit: Max number of results (default 10)
+    
+    Returns:
+        List of items: [ { zoho_item_id, name, sku, rate, score }, ... ]
+    """
+    if not ZOHO_ENABLED:
+        raise HTTPException(status_code=503, detail="Zoho module unavailable.")
+    
+    # If no query, return empty list
+    if not q or not q.strip():
+        return []
+    
+    try:
+        from backend.db import product_cache
+        
+        q_lower = q.lower().strip()
+        
+        # Search in product_cache: name or sku field (case-insensitive)
+        results = list(
+            product_cache().find(
+                {
+                    "$or": [
+                        {"name": {"$regex": q_lower, "$options": "i"}},
+                        {"sku": {"$regex": q_lower, "$options": "i"}},
+                    ]
+                },
+                {"_id": 0, "zoho_item_id": 1, "name": 1, "sku": 1, "rate": 1},
+            ).limit(limit)
+        )
+        
+        # Calculate fuzzy match score for better sorting
+        from rapidfuzz import fuzz
+        
+        scored = []
+        for item in results:
+            score = fuzz.token_set_ratio(q_lower, item.get("name", "").lower())
+            scored.append({
+                **item,
+                "score": round(score, 1),
+            })
+        
+        # Sort by score descending
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        
+        return scored
+    except Exception as e:
+        logger.error("Zoho items search failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+
+
+@app.get("/config/", tags=["System"])
+async def config():
+    """Return app configuration status (Zoho setup, vendor ID configured, etc)."""
+    return {
+        "zoho_enabled": ZOHO_ENABLED,
+        "vendor_zoho_id_configured": bool(VENDOR_ZOHO_ID),
+        "upload_dir": UPLOAD_DIR,
+    }
 
 
 @app.get("/health", tags=["System"])

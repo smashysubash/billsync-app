@@ -89,14 +89,14 @@ def _clean_name_line(tokens: list[str]) -> str:
 # ── PRIMARY: pdfplumber table extraction ─────────────────────────────────────
 
 # Expected column indices in the Milky Mist table header
-_COL_INDEX   = 0
-_COL_ITEM    = 1
-_COL_RATE    = 5   # PCS PRICE
+_COL_INDEX   = 0   # #
+_COL_ITEM    = 1   # ITEM
+_COL_RATE    = 5   # PCS PRICE (using PCS price as rate)
 _COL_INV_QTY = 8   # INVOICE QTY
 _COL_DISC    = 10  # DISC.
-_COL_CGST    = 11  # CGST
-_COL_SGST    = 12  # SGST
-_COL_TOTAL   = 13  # TOTAL
+_COL_CGST    = 11  # CGST %
+_COL_SGST    = 12  # SGST %
+_COL_TOTAL   = 13  # Total Amount
 
 _HEADER_KEYWORDS = {"item", "brand", "price", "qty", "total", "disc", "cgst", "sgst"}
 
@@ -197,12 +197,12 @@ def _parse_table_row(row: list) -> Optional[dict]:
         return None
 
     disc_pct = _pct(disc_raw)
-    cgst_pct = _pct(cgst_raw)
-    sgst_pct = _pct(sgst_raw)
-
     product_name = _clean_name_table(name_raw)
     if not product_name:
         return None
+
+    cgst_pct = _pct(cgst_raw)
+    sgst_pct = _pct(sgst_raw)
 
     expected_amt, amount_ok = _validate_amount(
         qty, rate, disc_pct, cgst_pct, sgst_pct, amt, idx, product_name
@@ -216,6 +216,7 @@ def _parse_table_row(row: list) -> Optional[dict]:
         "disc_pct":      disc_pct,
         "cgst_pct":      cgst_pct,
         "sgst_pct":      sgst_pct,
+        "tax_amount":    rate * qty * (cgst_pct + sgst_pct) / 100,
         "amount":        amt,
         "expected_amount": expected_amt,
         "amount_ok":     amount_ok,
@@ -375,6 +376,10 @@ def _parse_via_lines(text: str) -> list[dict]:
                 "qty": qty,
                 "rate": rate,
                 "amount": amount,
+                "disc_pct": 0.0,
+                "cgst_pct": 0.0,
+                "sgst_pct": 0.0,
+                "tax_amount": 0.0,
             }
             items.append(current_item)
 
@@ -418,26 +423,74 @@ def parse_invoice_lines(text: str, file_path: Optional[str] = None) -> list[dict
     return items
 
 
+def _normalize_date(date_str: str) -> str:
+    """Normalize various date formats (13-Feb-2026, 13/02/26, etc) to YYYY-MM-DD."""
+    if not date_str:
+        return ""
+    
+    from datetime import datetime
+    
+    # Try common formats
+    formats = [
+        "%d-%b-%Y",  # 13-Feb-2026
+        "%d-%m-%Y",  # 13-02-2026
+        "%d/%m/%Y",  # 13/02/2026
+        "%d-%b-%y",  # 13-Feb-26
+        "%d/%m/%y",  # 13/02/26
+        "%Y-%m-%d",  # 2026-05-01 (ISO)
+    ]
+    
+    clean_date = date_str.strip()
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(clean_date, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+            
+    return clean_date  # Return as-is if all else fails
+
+
 def extract_invoice_metadata(text: str) -> dict:
     """
     Best-effort extraction of invoice header fields:
       invoice_number, invoice_date, vendor
+    
+    Invoice number patterns (Milky Mist formats):
+      - Format A: "Company Invoice No : TN2526058332"
+      - Format B: "INV-1234"
+      - Format C: "MM/2026/0087"
+      - Format D: "Invoice #12345"
+      - Format E: Freeform alphanumeric (fallback)
     """
     meta = {"invoice_number": None, "invoice_date": None, "vendor": "Milky Mist"}
 
     for line in text.splitlines():
         line = line.strip()
 
-        # Invoice number: "Company Invoice No : TN2526058332(13-Feb-2026)"
-        m = re.search(
-            r"company\s+invoice\s+no\s*[:\.]?\s*([A-Z0-9]+)",
-            line,
-            re.IGNORECASE,
-        )
-        if m and not meta["invoice_number"]:
-            meta["invoice_number"] = m.group(1).strip()
+        # Format A: "Company Invoice No : TN2526058332(13-Feb-2026)"
+        if not meta["invoice_number"]:
+            m = re.search(
+                r"company\s+invoice\s+no\s*[:\.]?\s*([A-Z0-9]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                meta["invoice_number"] = m.group(1).strip()
 
-        # Fallback: generic invoice/bill number patterns
+        # Format B: "INV-1234" pattern
+        if not meta["invoice_number"]:
+            m = re.search(r"\b(INV-\d+)\b", line, re.IGNORECASE)
+            if m:
+                meta["invoice_number"] = m.group(1).strip()
+
+        # Format C: "MM/2026/0087" pattern (vendor/year/number)
+        if not meta["invoice_number"]:
+            m = re.search(r"\b([A-Z]{2}/\d{4}/\d{4,5})\b", line)
+            if m:
+                meta["invoice_number"] = m.group(1).strip()
+
+        # Format D: "Invoice #12345" or "Bill #12345" or "Invoice Number"
         if not meta["invoice_number"]:
             m = re.search(
                 r"(?:invoice|bill)\s*(?:no|number|#)[:\.]?\s*([A-Z0-9/-]+)",
@@ -448,18 +501,22 @@ def extract_invoice_metadata(text: str) -> dict:
                 meta["invoice_number"] = m.group(1).strip()
 
         # Date: "Purchase Invoice Date : 13-Feb-2026 12:00 PM"
-        m = re.search(
-            r"purchase\s+invoice\s+date\s*[:\.]?\s*(\d{1,2}-\w{3}-\d{4})",
-            line,
-            re.IGNORECASE,
-        )
-        if m and not meta["invoice_date"]:
-            meta["invoice_date"] = m.group(1).strip()
+        if not meta["invoice_date"]:
+            m = re.search(
+                r"purchase\s+invoice\s+date\s*[:\.]?\s*(\d{1,2}-\w{3}-\d{4})",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                meta["invoice_date"] = _normalize_date(m.group(1).strip())
 
         # Fallback: generic date patterns
         if not meta["invoice_date"]:
             m = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", line)
             if m:
-                meta["invoice_date"] = m.group(1)
+                meta["invoice_date"] = _normalize_date(m.group(1))
 
+    if not meta["invoice_number"]:
+        logger.warning("No invoice number found in text")
+    
     return meta
