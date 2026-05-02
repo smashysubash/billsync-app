@@ -205,6 +205,7 @@ class ConfirmInvoiceRequest(BaseModel):
     invoice_number: str
     invoice_date: str
     vendor_zoho_id: Optional[str] = None
+    file_path: Optional[str] = None
     line_items: list[ConfirmLineItem]
 
 
@@ -363,6 +364,7 @@ async def process_invoice(payload: dict):
             "tax_total": round(tax_total, 2),
             "grand_total": round(grand_total, 2),
         },
+        "file_path": payload.get("file_path"),
     }
 
 
@@ -435,6 +437,14 @@ async def confirm_invoice(req: ConfirmInvoiceRequest):
             cached = get_item_from_cache(li.zoho_item_id)
             mrp = cached.get("mrp") if cached else None
             save_price_history(li.zoho_item_id, li.rate, mrp)
+
+    # Cleanup local PDF if provided
+    if req.file_path and os.path.exists(req.file_path):
+        try:
+            os.remove(req.file_path)
+            logger.info("Deleted local PDF: %s", req.file_path)
+        except Exception as e:
+            logger.error("Failed to delete local PDF %s: %s", req.file_path, e)
 
     return {
         "success": True,

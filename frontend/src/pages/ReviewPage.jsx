@@ -187,7 +187,7 @@ function itemToRow(item, i) {
 
 // ——— Main Review Screen ———
 export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
-  const { meta, items: initialItems } = data;
+  const { meta, items: initialItems, file_path } = data;
 
   const [rows, setRows] = useState(() =>
     initialItems.map((item, i) => itemToRow(item, i))
@@ -330,6 +330,7 @@ export default function ReviewPage({ data, onReset, onConfirmed, onToast }) {
         invoice_number: meta.invoice_number ?? 'UNKNOWN',
         invoice_date:   meta.invoice_date   ?? new Date().toISOString().slice(0, 10),
         vendor_zoho_id: null,
+        file_path:      file_path,
         line_items: activeRows.map(r => ({
           index:         r.index,
           product_name:  r.extractedName,
