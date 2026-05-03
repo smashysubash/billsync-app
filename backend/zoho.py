@@ -229,7 +229,7 @@ def fetch_items() -> int:
         resp = httpx.get(
             f"{ZOHO_API_BASE}/items",
             headers=_headers(),
-            params={**_org_params(), "page": page, "per_page": 200},
+            params={**_org_params(), "page": page, "per_page": 200, "filter_by": "Status.Active"},
             timeout=30,
         )
         if resp.status_code == 401:
@@ -237,7 +237,7 @@ def fetch_items() -> int:
             resp = httpx.get(
                 f"{ZOHO_API_BASE}/items",
                 headers=_headers(),
-                params={**_org_params(), "page": page, "per_page": 200},
+                params={**_org_params(), "page": page, "per_page": 200, "filter_by": "Status.Active"},
                 timeout=30,
             )
         resp.raise_for_status()
