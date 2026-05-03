@@ -52,7 +52,7 @@ docker compose -f docker-compose.dev.yml up --build
 docker-compose up --build
 ```
 - **Frontend:** [http://localhost:3000](http://localhost:3000) (Production) / [http://localhost:5174](http://localhost:5174) (Dev)
-- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API Docs:** [http://localhost:9001/docs](http://localhost:9001/docs)
 
 ---
 

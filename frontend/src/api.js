@@ -71,7 +71,7 @@ export async function zohoStatus() {
 }
 
 export async function zohoConnect(clientId, clientSecret) {
-  const redirectUri = `${window.location.protocol}//${window.location.hostname}:8001/zoho/callback`;
+  const redirectUri = `${window.location.protocol}//${window.location.hostname}:9001/zoho/callback`;
   const res = await fetch(`${BASE}/zoho/connect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

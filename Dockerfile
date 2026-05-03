@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY backend/ ./backend/
 
 # Expose FastAPI port
-EXPOSE 8001
+EXPOSE 9001
 
 # Run FastAPI app
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "9001"]

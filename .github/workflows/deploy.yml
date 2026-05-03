@@ -48,7 +48,7 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           build-args: |
-            VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:8001' }}
+            VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:9001' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -91,4 +91,3 @@ jobs:
           labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-

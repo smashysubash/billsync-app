@@ -3,15 +3,13 @@ services:
     image: ghcr.io/smashysubash/billsync-backend:latest
     container_name: billsync-backend
     ports:
-      - "8001:8001"
+      - "9001:9001"
     volumes:
       - billsync_uploads:/app/uploads
     environment:
-      - MONGODB_URI=${MONGODB_URI}
-      - ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID}
-      - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET}
-      - ZOHO_REDIRECT_URI=${ZOHO_REDIRECT_URI}
-      - PORT=8001
+      - MONGO_URI=${MONGO_URI}
+      - VENDOR_ZOHO_ID=${VENDOR_ZOHO_ID}
+      - UPLOAD_DIR=${UPLOAD_DIR}
     restart: unless-stopped
 
   frontend:

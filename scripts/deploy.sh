@@ -38,7 +38,7 @@ deploy_container() {
 }
 
 deploy_container $FRONTEND_IMAGE $FRONTEND_CONTAINER "8080:80"
-deploy_container $BACKEND_IMAGE $BACKEND_CONTAINER "8000:8000"
+deploy_container $BACKEND_IMAGE $BACKEND_CONTAINER "9001:9001"
 
 # Cleanup
 echo "🧹 Cleaning up..."

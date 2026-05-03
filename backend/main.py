@@ -483,7 +483,7 @@ async def zoho_status():
 class ZohoConnectRequest(BaseModel):
     client_id: str
     client_secret: str
-    redirect_uri: str  # e.g. "http://localhost:8001/zoho/callback"
+    redirect_uri: str  # e.g. "http://localhost:9001/zoho/callback"
 
 
 @app.post("/zoho/connect", tags=["Zoho"])
@@ -508,7 +508,7 @@ async def zoho_connect(req: ZohoConnectRequest):
 
 
 @app.get("/zoho/callback", tags=["Zoho"])
-async def zoho_callback(code: str, redirect_uri: str = "http://localhost:8001/zoho/callback"):
+async def zoho_callback(code: str, redirect_uri: str = "http://localhost:9001/zoho/callback"):
     """
     Step 2 of OAuth: Zoho redirects here with ?code=...
     The backend exchanges the code for tokens and saves them.

@@ -4,7 +4,7 @@ services:
       context: .
     container_name: billsync-backend
     ports:
-      - "8001:8001"
+      - "9001:9001"
     volumes:
       - ./uploads:/app/uploads
     env_file:

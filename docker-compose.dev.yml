@@ -8,10 +8,10 @@ services:
       - ./backend:/app/backend
       - ./uploads:/app/uploads
     ports:
-      - "8001:8001"
+      - "9001:9001"
     env_file:
       - .env
-    command: uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 9001 --reload
     restart: unless-stopped
 
   frontend:
@@ -25,7 +25,7 @@ services:
     ports:
       - "5174:5173"
     environment:
-      - VITE_API_URL=http://localhost:8001
+      - VITE_API_URL=http://localhost:9001
     depends_on:
       - backend
     restart: unless-stopped
