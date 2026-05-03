@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
-from backend.db import price_history, product_cache
+from db import price_history, product_cache
 
 logger = logging.getLogger(__name__)
 

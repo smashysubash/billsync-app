@@ -11,7 +11,7 @@ Logic:
 import logging
 import re
 from rapidfuzz import process, fuzz, utils
-from backend.db import product_mapping, product_cache
+from db import product_mapping, product_cache
 from typing import Optional
 
 logger = logging.getLogger(__name__)

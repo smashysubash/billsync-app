@@ -25,7 +25,7 @@ services:
     ports:
       - "5174:5173"
     environment:
-      - VITE_API_URL=http://localhost:9001
+      - VITE_API_URL=${VITE_API_URL}
     depends_on:
       - backend
     restart: unless-stopped

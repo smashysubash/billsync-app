@@ -17,7 +17,7 @@ import json
 import logging
 from datetime import datetime, timezone
 import httpx
-from backend.db import product_cache, zoho_config
+from db import product_cache, zoho_config
 
 logger = logging.getLogger(__name__)
 

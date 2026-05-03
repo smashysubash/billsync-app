@@ -1,5 +1,5 @@
 // API base URL — default to empty string to use Nginx proxy
-const BASE = import.meta.env.VITE_API_URL ?? '';
+const BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function uploadInvoice(file) {
   const form = new FormData();

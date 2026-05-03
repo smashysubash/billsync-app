@@ -28,10 +28,10 @@ import pdfplumber
 from pdf2image import convert_from_path
 from paddleocr import PaddleOCR
 
-from backend.db import invoices, product_mapping
-from backend.matcher import fuzzy_match, get_mapping, save_mapping
-from backend.parser import extract_invoice_metadata, parse_invoice_lines
-from backend.price_checker import (
+from db import invoices, product_mapping
+from matcher import fuzzy_match, get_mapping, save_mapping
+from parser import extract_invoice_metadata, parse_invoice_lines
+from price_checker import (
     ItemStatus,
     check_price_change,
     get_item_from_cache,
@@ -40,7 +40,7 @@ from backend.price_checker import (
 
 # Try importing Zoho module — allow startup without credentials (graceful degradation)
 try:
-    from backend.zoho import (
+    from zoho import (
         create_bill, fetch_items, refresh_access_token,
         build_auth_url, exchange_code_for_tokens,
         get_connection_status, save_config, _load_config,
@@ -112,7 +112,8 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5174",
-        "http://192.168.1.50:3000"
+        "http://192.168.1.50:3000",
+        "http://192.168.1.50:5174"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -600,7 +601,7 @@ async def search_zoho_items(q: str = "", limit: int = 10):
         return []
     
     try:
-        from backend.db import product_cache
+        from db import product_cache
         
         q_lower = q.lower().strip()
         
